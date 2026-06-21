@@ -1,0 +1,3 @@
+textual>=0.86,<1
+rich>=13.9,<14
+rapidfuzz>=3.10,<4

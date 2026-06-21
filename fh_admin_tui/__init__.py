@@ -1,0 +1,1 @@
+"""Fear & Hunger Admin TUI."""
