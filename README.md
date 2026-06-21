@@ -26,7 +26,7 @@ implementacao curses legada e foi mantido apenas por compatibilidade.
 ## Como rodar
 
 ```bash
-cd /home/kim/Projetos/fh-admin-tui
+cd /home/kim/fh-admin-tui
 python3 -m venv .venv
 .venv/bin/python -m ensurepip --upgrade
 .venv/bin/python -m pip install -r requirements.txt
@@ -68,7 +68,7 @@ O log usa rotacao e tambem e emitido no terminal.
 ## Testes
 
 ```bash
-cd /home/kim/Projetos/fh-admin-tui
+cd /home/kim/fh-admin-tui
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
