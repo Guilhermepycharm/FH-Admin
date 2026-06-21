@@ -16,6 +16,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Lis
 from .catalog import Catalog, Entry
 from .diagnostics import LOG_PATH, get_logger
 from .mutations import (
+    LIMB_REPAIR_CONFIG,
     actor_display_name,
     actor_ids,
     actor_status_lines,
@@ -25,9 +26,10 @@ from .mutations import (
     cure_infections,
     diff_summary_lines,
     equipped_armor_ids,
+    heal_physical_conditions,
     list_owned_entries,
     party_actor_ids,
-    restore_supported_arms,
+    restore_supported_limbs,
     revive_actor,
     set_quantity,
     unequip_armor,
@@ -374,6 +376,9 @@ class FearHungerTextualApp(App[None]):
         width: 100%;
         margin-bottom: 1;
     }
+    #actions-view {
+        overflow-y: auto;
+    }
     #slot-meta {
         padding: 1;
         border-top: solid $panel;
@@ -444,8 +449,9 @@ class FearHungerTextualApp(App[None]):
                     yield Button("Adicionar skill", id="action-skill")
                     yield Button("Reviver ator", id="action-revive")
                     yield Button("Curar infeccao", id="action-infection")
-                    yield Button("Restaurar bracos", id="action-arms")
-                    yield Button("Adicionar a party", id="action-party")
+                    yield Button("Curar ferimentos", id="action-wounds")
+                    yield Button("Restaurar membros", id="action-arms")
+                    yield Button("Adicionar a party atual", id="action-party")
                     yield Button("Desequipar armadura", id="action-unequip")
                     yield Button("Aplicar alteracoes", id="action-apply", variant="success")
         yield Footer()
@@ -741,20 +747,41 @@ class FearHungerTextualApp(App[None]):
 
     @on(Button.Pressed, "#action-arms")
     def actor_arms(self) -> None:
-        self._start_flow(self._actor_arms_flow, "restaurar bracos")
+        self._start_flow(self._actor_arms_flow, "restaurar membros")
 
     async def _actor_arms_flow(self) -> None:
         actor_id = self._selected_actor_id()
         if actor_id is None or self.session is None:
             return
         actor_name = actor_display_name(self.session.data, self.catalog, actor_id)
-        restored = restore_supported_arms(self.session.data, actor_id)
-        if restored:
+        actor = self.session.data["actors"]["_data"]["@a"][actor_id]
+        states_before = list(actor["_states"]["@a"])
+        restored = restore_supported_limbs(self.session.data, actor_id)
+        states_changed = states_before != actor["_states"]["@a"]
+        if restored or states_changed:
             self.session.mark_dirty()
             self._refresh_all_views()
-            self.notify(f"Bracos restaurados em {actor_name}: {restored}")
+            self.notify(f"Membros restaurados em {actor_name}: {restored or 'estados corrigidos'}")
         else:
-            self.notify(f"Nenhum reparo de braco aplicavel para {actor_name}.", severity="warning")
+            self.notify(f"Nenhum membro ausente detectado para {actor_name}.", severity="warning")
+
+    @on(Button.Pressed, "#action-wounds")
+    def actor_wounds(self) -> None:
+        self._start_flow(self._actor_wounds_flow, "curar ferimentos")
+
+    async def _actor_wounds_flow(self) -> None:
+        actor_id = self._selected_actor_id()
+        if actor_id is None or self.session is None:
+            return
+        actor_name = actor_display_name(self.session.data, self.catalog, actor_id)
+        removed = heal_physical_conditions(self.session.data, actor_id)
+        if not removed:
+            self.notify(f"Nenhum ferimento curavel detectado em {actor_name}.", severity="warning")
+            return
+        self.session.mark_dirty()
+        self._refresh_all_views()
+        names = [self.catalog.states[state_id].name for state_id in removed if state_id in self.catalog.states]
+        self.notify(f"Ferimentos curados em {actor_name}: {', '.join(names)}")
 
     @on(Button.Pressed, "#action-party")
     def actor_party(self) -> None:
@@ -765,6 +792,9 @@ class FearHungerTextualApp(App[None]):
         if actor_id is None or self.session is None:
             return
         actor_name = actor_display_name(self.session.data, self.catalog, actor_id)
+        if len(party_actor_ids(self.session.data)) >= 4 and actor_id not in party_actor_ids(self.session.data):
+            self.notify("A party ja possui quatro membros.", severity="warning")
+            return
         changed = add_actor_to_party(self.session.data, actor_id)
         if changed:
             self.session.mark_dirty()
@@ -1049,7 +1079,15 @@ class FearHungerTextualApp(App[None]):
         root = self.screen_stack[0]
         panel = self._current_panel()
         inventory_actions = {"action-add", "action-set", "action-plus", "action-minus", "action-delete"}
-        actor_actions = {"action-skill", "action-revive", "action-infection", "action-arms", "action-party", "action-unequip"}
+        actor_actions = {
+            "action-skill",
+            "action-revive",
+            "action-infection",
+            "action-wounds",
+            "action-arms",
+            "action-party",
+            "action-unequip",
+        }
         all_actions = inventory_actions | actor_actions | {"action-apply"}
         for action_id in all_actions:
             button = root.query_one(f"#{action_id}", Button)
@@ -1069,8 +1107,27 @@ class FearHungerTextualApp(App[None]):
         for action_id in ("action-set", "action-plus", "action-minus", "action-delete"):
             root.query_one(f"#{action_id}", Button).disabled = self.operation_in_progress or not selected_inventory
         root.query_one("#action-add", Button).disabled = self.operation_in_progress or not has_session
-        for action_id in ("action-skill", "action-revive", "action-infection", "action-arms", "action-party", "action-unequip"):
+        for action_id in (
+            "action-skill",
+            "action-revive",
+            "action-infection",
+            "action-wounds",
+            "action-arms",
+            "action-party",
+            "action-unequip",
+        ):
             root.query_one(f"#{action_id}", Button).disabled = self.operation_in_progress or not selected_actor
+        if has_session and selected_actor:
+            assert self.session is not None
+            party = party_actor_ids(self.session.data)
+            root.query_one("#action-arms", Button).disabled = (
+                self.operation_in_progress or self.actor_selection not in LIMB_REPAIR_CONFIG
+            )
+            root.query_one("#action-party", Button).disabled = (
+                self.operation_in_progress
+                or self.actor_selection in party
+                or len(party) >= 4
+            )
         apply_button.disabled = self.operation_in_progress or not has_session or not bool(self.session and self.session.dirty)
         for action_id in ("open-slot", "backup-slot", "restore-slot", "refresh-slots"):
             root.query_one(f"#{action_id}", Button).disabled = self.operation_in_progress

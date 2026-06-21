@@ -18,7 +18,9 @@ implementacao curses legada e foi mantido apenas por compatibilidade.
   - party
   - revive de ator
   - cura de infeccao
-  - restauracao de bracos para D'arce e Le'garde
+  - cura de sangramento, fratura e infeccoes
+  - restauracao de membros para personagens com switches mapeados
+  - adicao segura de membros a party atual, respeitando o limite de quatro
 - Re-encode e substitui o save original so no `apply`
 
 ## Como rodar

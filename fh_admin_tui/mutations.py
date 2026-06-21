@@ -6,6 +6,8 @@ from .catalog import Catalog
 
 
 INFECTION_STATES = (55, 56)
+LIMB_CUT_STATES = (3, 14)
+PHYSICAL_CONDITION_STATES = (5, 19, 55, 56)
 INFECTION_VARIABLES = {
     1: (230, 241),
     2: (231, 242),
@@ -18,26 +20,46 @@ INFECTION_VARIABLES = {
     9: (238, 249),
     10: (239, 250),
 }
-ARM_REPAIR_CONFIG = {
+LIMB_REPAIR_CONFIG = {
+    1: {"label": "Cahara", "limb_switches": (36, 37, 38, 39)},
+    2: {"label": "Girl", "limb_switches": (168, 169, 170, 171)},
     3: {
         "label": "D'arce",
         "arm_switches": (248, 249),
+        "limb_switches": (248, 249, 250, 251),
         "character": "knight",
         "face": "Actor1",
         "face_index": 2,
         "battler_missing": "knight1_2",
         "battler_intact": "knight1_1",
     },
+    4: {"label": "Enki", "limb_switches": (252, 253, 254, 255)},
+    5: {"label": "Ragnvaldr", "limb_switches": (256, 257, 258, 259)},
     6: {
         "label": "Le'garde",
         "arm_switches": (261, 262),
+        "limb_switches": (261, 262, 263, 264),
         "character": "captain",
         "face": "Actor2",
         "face_index": 0,
         "battler_missing": "captain1_2",
         "battler_intact": "captain1_1",
     },
+    7: {"label": "Moonless", "limb_switches": (270, 271, 272)},
+    8: {"label": "Kid Demon", "limb_switches": (381, 382, 383, 384)},
+    9: {"label": "Marriage", "limb_switches": (385, 386, 387, 388)},
+    10: {"label": "Blood golem", "limb_switches": (376, 377, 378, 379)},
+    11: {"label": "Marriage fusion", "limb_switches": (390, 391, 392, 393)},
+    16: {"label": "Ghoul 1", "limb_switches": (91, 92, 93, 94)},
+    17: {"label": "Ghoul 2", "limb_switches": (155, 156, 157, 158)},
+    18: {"label": "Ghoul 3", "limb_switches": (161, 162, 163, 164)},
+    19: {"label": "Skeleton 1", "limb_switches": (841, 842, 843, 844)},
+    20: {"label": "Skeleton 2", "limb_switches": (845, 846, 847, 848)},
+    21: {"label": "Skeleton 3", "limb_switches": (849, 850, 851, 852)},
 }
+
+# Backwards-compatible name used by the legacy curses interface.
+ARM_REPAIR_CONFIG = LIMB_REPAIR_CONFIG
 
 
 @dataclass
@@ -184,28 +206,58 @@ def cure_infections(data: dict, actor_id: int) -> list[int]:
     return removed
 
 
-def restore_supported_arms(data: dict, actor_id: int) -> list[int]:
-    config = ARM_REPAIR_CONFIG.get(actor_id)
+def heal_physical_conditions(data: dict, actor_id: int) -> list[int]:
+    actor = get_actor(data, actor_id)
+    states = actor["_states"]["@a"]
+    removed: list[int] = []
+    for state_id in PHYSICAL_CONDITION_STATES:
+        while state_id in states:
+            states.remove(state_id)
+            removed.append(state_id)
+        actor["_stateTurns"].pop(str(state_id), None)
+        actor["_stateSteps"].pop(str(state_id), None)
+
+    variables = data["variables"]["_data"]["@a"]
+    for variable_id in INFECTION_VARIABLES.get(actor_id, ()):
+        if 0 <= variable_id < len(variables):
+            variables[variable_id] = 0
+    return removed
+
+
+def restore_supported_limbs(data: dict, actor_id: int) -> list[int]:
+    config = LIMB_REPAIR_CONFIG.get(actor_id)
     if config is None:
         return []
     switches = data["switches"]["_data"]["@a"]
     actor = get_actor(data, actor_id)
     restored: list[int] = []
 
-    for switch_id in config["arm_switches"]:
+    for switch_id in config["limb_switches"]:
         if 0 <= switch_id < len(switches) and switches[switch_id] is True:
             switches[switch_id] = None
             restored.append(switch_id)
 
     if restored:
-        actor["_characterName"] = config["character"]
-        actor["_characterIndex"] = 0
-        actor["_faceName"] = config["face"]
-        actor["_faceIndex"] = config["face_index"]
-        actor["_battlerName"] = str(actor["_battlerName"]).replace(
-            config["battler_missing"], config["battler_intact"], 1
-        )
+        for state_id in LIMB_CUT_STATES:
+            while state_id in actor["_states"]["@a"]:
+                actor["_states"]["@a"].remove(state_id)
+            actor["_stateTurns"].pop(str(state_id), None)
+            actor["_stateSteps"].pop(str(state_id), None)
+
+        arm_switches = set(config.get("arm_switches", ()))
+        if arm_switches.intersection(restored):
+            actor["_characterName"] = config["character"]
+            actor["_characterIndex"] = 0
+            actor["_faceName"] = config["face"]
+            actor["_faceIndex"] = config["face_index"]
+            actor["_battlerName"] = str(actor["_battlerName"]).replace(
+                config["battler_missing"], config["battler_intact"], 1
+            )
     return restored
+
+
+def restore_supported_arms(data: dict, actor_id: int) -> list[int]:
+    return restore_supported_limbs(data, actor_id)
 
 
 def equipped_armor_ids(data: dict, actor_id: int) -> list[int]:
@@ -262,11 +314,15 @@ def actor_status_lines(data: dict, catalog: Catalog, actor_id: int) -> list[str]
             for armor_id, entry in zip(equipped, armor_names)
         )
         lines.append(f"Armors equipadas: {rendered}")
-    if actor_id in ARM_REPAIR_CONFIG:
-        switch_ids = ARM_REPAIR_CONFIG[actor_id]["arm_switches"]
+    if actor_id in LIMB_REPAIR_CONFIG:
+        switch_ids = LIMB_REPAIR_CONFIG[actor_id]["limb_switches"]
         switches = data["switches"]["_data"]["@a"]
-        missing = [str(switch_id) for switch_id in switch_ids if switches[switch_id] is True]
-        lines.append(f"Bracos ausentes: {', '.join(missing) if missing else 'nao'}")
+        missing = [
+            str(switch_id)
+            for switch_id in switch_ids
+            if 0 <= switch_id < len(switches) and switches[switch_id] is True
+        ]
+        lines.append(f"Membros ausentes: {', '.join(missing) if missing else 'nao'}")
     return lines
 
 
@@ -410,5 +466,22 @@ def diff_summary_lines(baseline: dict, current: dict, catalog: Catalog) -> list[
             lines.append(
                 f"Ator {actor_display_name(current, catalog, actor_id)}: armaduras {before_equips} -> {after_equips}"
             )
+
+        limb_config = LIMB_REPAIR_CONFIG.get(actor_id)
+        if limb_config is not None:
+            before_switches = baseline["switches"]["_data"]["@a"]
+            after_switches = current["switches"]["_data"]["@a"]
+            restored_switches = [
+                switch_id
+                for switch_id in limb_config["limb_switches"]
+                if switch_id < len(before_switches)
+                and switch_id < len(after_switches)
+                and before_switches[switch_id] is True
+                and after_switches[switch_id] is not True
+            ]
+            if restored_switches:
+                lines.append(
+                    f"Ator {actor_display_name(current, catalog, actor_id)}: restaurou membros {restored_switches}"
+                )
 
     return lines or ["Nenhuma alteracao staged."]
