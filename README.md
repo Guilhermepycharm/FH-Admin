@@ -2,6 +2,9 @@
 
 Painel TUI para editar saves de Fear & Hunger 1 no terminal.
 
+A interface suportada e baseada em Textual. O modulo `fh_admin_tui/tui.py` e a
+implementacao curses legada e foi mantido apenas por compatibilidade.
+
 ## O que faz
 
 - Lista os slots em `www/save`
@@ -47,6 +50,28 @@ O `run.py` detecta a `.venv` local e usa ela automaticamente.
 - `?`: ajuda curta
 
 As acoes principais ficam em botoes contextuais no painel da direita.
+Durante operacoes de arquivo, os controles ficam temporariamente desabilitados
+e o painel mostra a acao em andamento.
+
+## Diagnostico
+
+Erros aparecem como notificacao na interface e o traceback completo e gravado em:
+
+```text
+~/.local/state/fh-admin-tui/fh-admin-tui.log
+```
+
+O log usa rotacao e tambem e emitido no terminal.
+
+## Testes
+
+```bash
+cd /home/kim/Projetos/fh-admin-tui
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+O teste de codec trabalha em uma copia temporaria de um slot e nao grava nos
+saves originais.
 
 ## Observacoes
 
@@ -54,3 +79,4 @@ As acoes principais ficam em botoes contextuais no painel da direita.
 - O fluxo usa o codec local de `.rpgsave` com `lz-string.js`.
 - Agora usa `textual`, `rich` e `rapidfuzz`.
 - O `apply` faz validacao basica e mostra uma revisao antes de gravar.
+- O save final e substituido atomicamente e sempre recebe backup antes do apply.

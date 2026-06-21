@@ -96,19 +96,26 @@ def add_quantity(data: dict, kind: str, entry_id: int, delta: int) -> int:
 
 def actor_ids(data: dict) -> list[int]:
     actors = data["actors"]["_data"]["@a"]
+    if not isinstance(actors, list):
+        raise TypeError("actors._data.@a nao e uma lista")
     return [index for index, actor in enumerate(actors) if index > 0 and actor is not None]
 
 
 def get_actor(data: dict, actor_id: int) -> dict:
     actors = data["actors"]["_data"]["@a"]
+    if not isinstance(actor_id, int) or actor_id <= 0 or actor_id >= len(actors):
+        raise KeyError(f"actor {actor_id} is out of range")
     actor = actors[actor_id]
-    if actor is None:
+    if not isinstance(actor, dict):
         raise KeyError(f"actor {actor_id} is missing")
     return actor
 
 
 def party_actor_ids(data: dict) -> list[int]:
-    return list(data["party"]["_actors"]["@a"])
+    party = data["party"]["_actors"]["@a"]
+    if not isinstance(party, list):
+        raise TypeError("party._actors.@a nao e uma lista")
+    return list(party)
 
 
 def actor_display_name(data: dict, catalog: Catalog, actor_id: int) -> str:
@@ -116,12 +123,15 @@ def actor_display_name(data: dict, catalog: Catalog, actor_id: int) -> str:
     save_name = str(actor.get("_name") or "").strip()
     if save_name:
         return save_name
-    return catalog.actors.get(actor_id, catalog.actors[actor_id]).name
+    catalog_actor = catalog.actors.get(actor_id)
+    return catalog_actor.name if catalog_actor is not None else f"Actor {actor_id}"
 
 
 def add_skill(data: dict, actor_id: int, skill_id: int) -> bool:
     actor = get_actor(data, actor_id)
     skills = actor["_skills"]["@a"]
+    if not isinstance(skills, list):
+        raise TypeError(f"actor {actor_id} possui lista de skills invalida")
     if skill_id in skills:
         return False
     skills.append(skill_id)
@@ -152,7 +162,8 @@ def revive_actor(data: dict, actor_id: int, clear_switches: tuple[int, ...] = ()
 
     switches = data["switches"]["_data"]["@a"]
     for switch_id in clear_switches:
-        switches[switch_id] = None
+        if 0 <= switch_id < len(switches):
+            switches[switch_id] = None
 
 
 def cure_infections(data: dict, actor_id: int) -> list[int]:
@@ -168,7 +179,8 @@ def cure_infections(data: dict, actor_id: int) -> list[int]:
 
     variables = data["variables"]["_data"]["@a"]
     for variable_id in INFECTION_VARIABLES.get(actor_id, ()):
-        variables[variable_id] = 0
+        if 0 <= variable_id < len(variables):
+            variables[variable_id] = 0
     return removed
 
 
@@ -181,7 +193,7 @@ def restore_supported_arms(data: dict, actor_id: int) -> list[int]:
     restored: list[int] = []
 
     for switch_id in config["arm_switches"]:
-        if switches[switch_id] is True:
+        if 0 <= switch_id < len(switches) and switches[switch_id] is True:
             switches[switch_id] = None
             restored.append(switch_id)
 
@@ -200,6 +212,8 @@ def equipped_armor_ids(data: dict, actor_id: int) -> list[int]:
     actor = get_actor(data, actor_id)
     equipped: list[int] = []
     for equip in actor["_equips"]["@a"]:
+        if not isinstance(equip, dict):
+            continue
         if equip.get("_dataClass") == "armor" and int(equip.get("_itemId", 0)) > 0:
             equipped.append(int(equip["_itemId"]))
     return equipped
@@ -262,11 +276,23 @@ def validate_data(data: dict) -> list[str]:
     try:
         actors = data["actors"]["_data"]["@a"]
         party = data["party"]["_actors"]["@a"]
-    except KeyError as exc:
+        if not isinstance(actors, list):
+            return ["actors._data.@a nao e uma lista"]
+        if not isinstance(party, list):
+            return ["party._actors.@a nao e uma lista"]
+    except (KeyError, TypeError) as exc:
         return [f"Estrutura ausente no save: {exc}"]
 
     for kind in ("items", "weapons", "armors"):
-        for key, value in inventory_map(data, kind).items():
+        try:
+            inventory = inventory_map(data, kind)
+        except (KeyError, TypeError) as exc:
+            errors.append(f"{kind}: estrutura invalida ({exc})")
+            continue
+        for key, value in inventory.items():
+            if not isinstance(key, str):
+                errors.append(f"{kind}: chave nao textual {key!r}")
+                continue
             if key.startswith("@"):
                 continue
             if not key.isdigit():
@@ -280,13 +306,35 @@ def validate_data(data: dict) -> list[str]:
         if not isinstance(actor_id, int) or actor_id <= 0 or actor_id >= len(actors) or actors[actor_id] is None:
             errors.append(f"party contem ator invalido: {actor_id!r}")
 
-    for actor_id in actor_ids(data):
-        actor = get_actor(data, actor_id)
-        if actor.get("_hp", 0) < 0:
+    for actor_id, actor in enumerate(actors):
+        if actor_id == 0 or actor is None:
+            continue
+        if not isinstance(actor, dict):
+            errors.append(f"ator {actor_id} possui estrutura invalida")
+            continue
+        hp = actor.get("_hp", 0)
+        if not isinstance(hp, (int, float)):
+            errors.append(f"ator {actor_id} com HP nao numerico")
+        elif hp < 0:
             errors.append(f"ator {actor_id} com HP negativo")
-        for equip in actor["_equips"]["@a"]:
+        try:
+            equips = actor["_equips"]["@a"]
+        except (KeyError, TypeError):
+            errors.append(f"ator {actor_id} sem estrutura de equipamentos")
+            continue
+        if not isinstance(equips, list):
+            errors.append(f"ator {actor_id} com equipamentos invalidos")
+            continue
+        for equip in equips:
+            if not isinstance(equip, dict):
+                errors.append(f"ator {actor_id} possui equip invalido")
+                continue
             data_class = equip.get("_dataClass")
-            item_id = int(equip.get("_itemId", 0))
+            try:
+                item_id = int(equip.get("_itemId", 0))
+            except (TypeError, ValueError):
+                errors.append(f"ator {actor_id} possui _itemId invalido")
+                continue
             if item_id < 0:
                 errors.append(f"ator {actor_id} possui equip com item negativo")
             if data_class not in ("", "weapon", "armor"):

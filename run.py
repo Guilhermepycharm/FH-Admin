@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -21,6 +22,10 @@ def maybe_reexec_venv() -> None:
 def main() -> int:
     maybe_reexec_venv()
     try:
+        from fh_admin_tui.diagnostics import configure_logging, get_logger
+
+        log_path = configure_logging()
+        logger = get_logger("launcher")
         from fh_admin_tui.textual_app import main as app_main
     except ModuleNotFoundError as exc:
         missing = exc.name or "dependencia"
@@ -33,7 +38,19 @@ def main() -> int:
         ]
         print("\n".join(message), file=sys.stderr)
         return 1
-    return app_main()
+    except Exception:
+        traceback.print_exc()
+        return 1
+
+    try:
+        return app_main()
+    except KeyboardInterrupt:
+        logger.info("Aplicacao interrompida pelo usuario")
+        return 130
+    except Exception:
+        logger.exception("Falha fatal durante a execucao")
+        print(f"Falha fatal. Detalhes registrados em {log_path}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

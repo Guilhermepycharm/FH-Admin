@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Awaitable, Callable
 
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.coordinate import Coordinate
+from textual.css.query import NoMatches
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, ListItem, ListView, Static, TabbedContent, TabPane
 
 from .catalog import Catalog, Entry
+from .diagnostics import LOG_PATH, get_logger
 from .mutations import (
     actor_display_name,
     actor_ids,
@@ -34,6 +36,9 @@ from .mutations import (
 from .save_ops import SaveRepository, SaveSession, SaveSlot
 
 
+logger = get_logger("textual")
+
+
 PANEL_TITLES = {
     "summary": "Resumo",
     "items": "Itens",
@@ -51,6 +56,7 @@ class SearchChoice:
 
 
 class ConfirmScreen(ModalScreen[bool]):
+    BINDINGS = [Binding("escape", "dismiss_false", "Cancelar")]
     CSS = """
     ConfirmScreen {
         align: center middle;
@@ -84,6 +90,9 @@ class ConfirmScreen(ModalScreen[bool]):
                 yield Button("Cancelar", id="cancel")
                 yield Button("Confirmar", id="confirm", variant="primary")
 
+    def on_mount(self) -> None:
+        self.call_after_refresh(lambda: self.query_one("#confirm", Button).focus())
+
     @on(Button.Pressed, "#cancel")
     def cancel(self) -> None:
         self.dismiss(False)
@@ -91,6 +100,9 @@ class ConfirmScreen(ModalScreen[bool]):
     @on(Button.Pressed, "#confirm")
     def confirm(self) -> None:
         self.dismiss(True)
+
+    def action_dismiss_false(self) -> None:
+        self.dismiss(False)
 
 
 class TextInputScreen(ModalScreen[str | None]):
@@ -248,6 +260,7 @@ class ChoiceScreen(ModalScreen[SearchChoice | None]):
 
 
 class ReviewScreen(ModalScreen[bool]):
+    BINDINGS = [Binding("escape", "dismiss_false", "Cancelar")]
     CSS = """
     ReviewScreen {
         align: center middle;
@@ -292,6 +305,8 @@ class ReviewScreen(ModalScreen[bool]):
         if self.errors:
             body += "\n\nErros de validacao:\n" + "\n".join(f"- {error}" for error in self.errors)
         self.query_one("#review-body", Static).update(body or "Nenhuma alteracao.")
+        target = "#cancel" if self.errors else "#confirm"
+        self.call_after_refresh(lambda: self.query_one(target, Button).focus())
 
     @on(Button.Pressed, "#cancel")
     def cancel(self) -> None:
@@ -300,6 +315,9 @@ class ReviewScreen(ModalScreen[bool]):
     @on(Button.Pressed, "#confirm")
     def confirm(self) -> None:
         self.dismiss(True)
+
+    def action_dismiss_false(self) -> None:
+        self.dismiss(False)
 
 
 class FearHungerTextualApp(App[None]):
@@ -360,10 +378,14 @@ class FearHungerTextualApp(App[None]):
         padding: 1;
         border-top: solid $panel;
     }
+    #operation-status {
+        padding: 0 1 1 1;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [
-        Binding("ctrl+q", "quit", "Sair"),
+        Binding("ctrl+q", "request_quit", "Sair"),
         Binding("f5", "reload_slots", "Recarregar slots"),
         Binding("ctrl+b", "backup_current", "Backup"),
         Binding("ctrl+r", "reload_session", "Recarregar slot"),
@@ -371,16 +393,17 @@ class FearHungerTextualApp(App[None]):
         Binding("?", "show_help", "Ajuda"),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, repo: SaveRepository | None = None, catalog: Catalog | None = None) -> None:
         super().__init__()
-        self.repo = SaveRepository()
-        self.catalog = Catalog.load(self.repo.data_dir)
+        self.repo = repo or SaveRepository()
+        self.catalog = catalog or Catalog.load(self.repo.data_dir)
         self.slots: list[SaveSlot] = []
         self.slot_lookup: dict[str, SaveSlot] = {}
         self.session: SaveSession | None = None
         self.current_slot_key: str | None = None
         self.inventory_selection: dict[str, int | None] = {"items": None, "weapons": None, "armors": None}
         self.actor_selection: int | None = None
+        self.operation_in_progress = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -391,7 +414,7 @@ class FearHungerTextualApp(App[None]):
                 with Horizontal(id="sidebar-buttons"):
                     yield Button("Abrir", id="open-slot", variant="primary")
                     yield Button("Backup", id="backup-slot")
-                    yield Button("Restore", id="restore-slot")
+                    yield Button("Restaurar", id="restore-slot")
                     yield Button("Atualizar", id="refresh-slots")
                 yield Static("", id="slot-meta")
             with Vertical(id="main-pane"):
@@ -412,6 +435,7 @@ class FearHungerTextualApp(App[None]):
                 yield Static("Nenhum slot aberto.", id="detail-view")
                 yield Label("Acoes", classes="panel-title")
                 with Vertical(id="actions-view"):
+                    yield Static("Pronto.", id="operation-status")
                     yield Button("Adicionar entrada", id="action-add", variant="primary")
                     yield Button("Definir quantidade", id="action-set")
                     yield Button("Somar quantidade", id="action-plus")
@@ -422,16 +446,25 @@ class FearHungerTextualApp(App[None]):
                     yield Button("Curar infeccao", id="action-infection")
                     yield Button("Restaurar bracos", id="action-arms")
                     yield Button("Adicionar a party", id="action-party")
-                    yield Button("Desequipar armor", id="action-unequip")
-                    yield Button("Apply", id="action-apply", variant="success")
+                    yield Button("Desequipar armadura", id="action-unequip")
+                    yield Button("Aplicar alteracoes", id="action-apply", variant="success")
         yield Footer()
 
     def on_mount(self) -> None:
         self._setup_tables()
-        self.refresh_slots()
         self._update_actions_visibility()
-        if self.slots:
-            self.call_after_refresh(self._open_selected_slot_no_confirm)
+        self.call_after_refresh(lambda: self._start_flow(self._initial_load_flow, "carregar saves"))
+
+    def on_unmount(self) -> None:
+        if self.operation_in_progress:
+            logger.warning("Encerramento durante operacao; limpeza temporaria delegada ao processo")
+            return
+        if self.session is not None:
+            try:
+                self.session.close()
+            except OSError:
+                logger.exception("Falha ao limpar a sessao temporaria no encerramento")
+            self.session = None
 
     def _setup_tables(self) -> None:
         for table_id in ("items-table", "weapons-table", "armors-table"):
@@ -443,7 +476,10 @@ class FearHungerTextualApp(App[None]):
         actors.add_columns("ID", "Nome", "Party", "HP", "States")
 
     def refresh_slots(self) -> None:
-        self.slots = self.repo.list_slots()
+        self._render_slots(self.repo.list_slots())
+
+    def _render_slots(self, slots: list[SaveSlot]) -> None:
+        self.slots = slots
         self.slot_lookup = {}
         list_view = self.query_one("#slots", ListView)
         list_view.clear()
@@ -457,9 +493,14 @@ class FearHungerTextualApp(App[None]):
         else:
             self.query_one("#slot-meta", Static).update("Nenhum save encontrado.")
 
+    async def _initial_load_flow(self) -> None:
+        slots = await asyncio.to_thread(self.repo.list_slots)
+        self._render_slots(slots)
+        if slots:
+            await self._open_selected_slot()
+
     def action_reload_slots(self) -> None:
-        self.refresh_slots()
-        self.notify("Lista de slots recarregada.")
+        self._start_flow(self._reload_slots_flow, "recarregar slots")
 
     def action_show_help(self) -> None:
         self.notify("Ctrl+S apply, Ctrl+B backup, Ctrl+R recarregar, F5 atualizar slots.")
@@ -470,21 +511,85 @@ class FearHungerTextualApp(App[None]):
 
         def callback(result) -> None:
             if not future.done():
-                future.set_result(result)
+                loop.call_soon(future.set_result, result)
 
         self.push_screen(screen, callback=callback)
         return await future
 
-    async def action_backup_current(self) -> None:
+    def _start_flow(self, flow: Callable[[], Awaitable[None]], label: str) -> None:
+        if self.operation_in_progress:
+            self.notify("Aguarde a operacao atual terminar.", severity="warning")
+            return
+        self.operation_in_progress = True
+        self._set_operation_status(f"Executando: {label}...")
+        self._update_actions_visibility()
+        self.run_worker(self._guard_flow(flow, label), exclusive=False, name=label)
+
+    async def _guard_flow(self, flow: Callable[[], Awaitable[None]], label: str) -> None:
+        logger.info("Inicio da operacao: %s", label)
+        failed = False
+        try:
+            await flow()
+        except asyncio.CancelledError:
+            logger.info("Operacao cancelada: %s", label)
+            raise
+        except Exception as exc:
+            failed = True
+            logger.exception("Falha na operacao: %s", label)
+            self._set_operation_status(f"Falha: {label}")
+            self.notify(
+                f"Falha ao {label}: {exc}. Detalhes em {LOG_PATH}",
+                title="Erro",
+                severity="error",
+                timeout=10,
+            )
+        finally:
+            self.operation_in_progress = False
+            if not failed:
+                self._set_operation_status("Pronto.")
+            try:
+                self._update_actions_visibility()
+            except (IndexError, NoMatches):
+                logger.info("Tela principal ja foi desmontada ao finalizar: %s", label)
+            logger.info("Fim da operacao: %s", label)
+
+    def _set_operation_status(self, message: str) -> None:
+        try:
+            self.screen_stack[0].query_one("#operation-status", Static).update(message)
+        except (IndexError, NoMatches):
+            logger.debug("Status ignorado porque a tela principal nao esta montada")
+
+    async def _reload_slots_flow(self) -> None:
+        slots = await asyncio.to_thread(self.repo.list_slots)
+        self._render_slots(slots)
+        self.notify("Lista de slots recarregada.")
+
+    def action_request_quit(self) -> None:
+        self._start_flow(self._quit_flow, "sair")
+
+    async def _quit_flow(self) -> None:
+        if self.session is not None and self.session.dirty:
+            confirmed = await self._await_screen_result(ConfirmScreen("Sair e perder alteracoes staged?"))
+            if not confirmed:
+                return
+        if self.session is not None:
+            await asyncio.to_thread(self.session.close)
+            self.session = None
+        self.exit()
+
+    def action_backup_current(self) -> None:
+        self._start_flow(self._backup_current_flow, "criar backup")
+
+    async def _backup_current_flow(self) -> None:
         slot = self._selected_slot()
         if slot is None:
             self.notify("Nenhum slot selecionado.", severity="warning")
             return
-        backup = self.repo.create_backup(slot)
+        backup = await asyncio.to_thread(self.repo.create_backup, slot)
         self.notify(f"Backup criado: {backup.name}")
 
     def action_reload_session(self) -> None:
-        self.run_worker(self._reload_session_flow(), exclusive=True)
+        self._start_flow(self._reload_session_flow, "recarregar slot")
 
     async def _reload_session_flow(self) -> None:
         if self.session is None:
@@ -493,78 +598,99 @@ class FearHungerTextualApp(App[None]):
             confirmed = await self._await_screen_result(ConfirmScreen("Descartar alteracoes staged e recarregar?"))
             if not confirmed:
                 return
-        self.session.reload()
+        await asyncio.to_thread(self.session.reload)
         self._refresh_all_views()
         self.notify("Sessao recarregada do save original.")
 
     def action_apply_changes(self) -> None:
-        self.run_worker(self._review_and_apply(), exclusive=True)
+        self._start_flow(self._review_and_apply, "aplicar alteracoes")
 
     @on(ListView.Selected, "#slots")
-    async def slot_selected(self, event: ListView.Selected) -> None:
+    def slot_selected(self, event: ListView.Selected) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
         if event.item and event.item.id and event.item.id in self.slot_lookup:
             self._update_slot_meta(self.slot_lookup[event.item.id])
-            await self._open_selected_slot()
 
     @on(ListView.Highlighted, "#slots")
     def slot_highlighted(self, event: ListView.Highlighted) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
         if event.item and event.item.id and event.item.id in self.slot_lookup:
             self._update_slot_meta(self.slot_lookup[event.item.id])
 
     @on(Button.Pressed, "#open-slot")
     def open_slot_button(self) -> None:
-        self.run_worker(self._open_selected_slot(), exclusive=True)
+        self._start_flow(self._open_selected_slot, "abrir slot")
 
     @on(Button.Pressed, "#backup-slot")
-    async def backup_slot_button(self) -> None:
-        await self.action_backup_current()
+    def backup_slot_button(self) -> None:
+        self.action_backup_current()
 
     @on(Button.Pressed, "#restore-slot")
     def restore_slot_button(self) -> None:
-        self.run_worker(self._restore_backup(), exclusive=True)
+        self._start_flow(self._restore_backup, "restaurar backup")
 
     @on(Button.Pressed, "#refresh-slots")
     def refresh_slots_button(self) -> None:
-        self.refresh_slots()
+        self.action_reload_slots()
 
     @on(TabbedContent.TabActivated, "#tabs")
     def tab_changed(self) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
         self._update_actions_visibility()
         self._refresh_detail_panel()
 
     @on(DataTable.RowHighlighted)
     def table_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if isinstance(self.screen, ModalScreen) or event.data_table.id not in {
+            "items-table",
+            "weapons-table",
+            "armors-table",
+            "actors-table",
+        }:
+            return
         self._store_selection(event.data_table)
         self._refresh_detail_panel()
+        self._update_actions_visibility()
 
     @on(DataTable.RowSelected)
-    async def table_selected(self, event: DataTable.RowSelected) -> None:
+    def table_selected(self, event: DataTable.RowSelected) -> None:
+        if isinstance(self.screen, ModalScreen) or event.data_table.id not in {
+            "items-table",
+            "weapons-table",
+            "armors-table",
+            "actors-table",
+        }:
+            return
         self._store_selection(event.data_table)
         self._refresh_detail_panel()
+        self._update_actions_visibility()
 
     @on(Button.Pressed, "#action-add")
     def add_entry(self) -> None:
-        self.run_worker(self._add_entry_flow(), exclusive=True)
+        self._start_flow(self._add_entry_flow, "adicionar entrada")
 
     @on(Button.Pressed, "#action-set")
     def set_entry(self) -> None:
-        self.run_worker(self._mutate_inventory("set"), exclusive=True)
+        self._start_flow(lambda: self._mutate_inventory("set"), "definir quantidade")
 
     @on(Button.Pressed, "#action-plus")
     def plus_entry(self) -> None:
-        self.run_worker(self._mutate_inventory("plus"), exclusive=True)
+        self._start_flow(lambda: self._mutate_inventory("plus"), "somar quantidade")
 
     @on(Button.Pressed, "#action-minus")
     def minus_entry(self) -> None:
-        self.run_worker(self._mutate_inventory("minus"), exclusive=True)
+        self._start_flow(lambda: self._mutate_inventory("minus"), "subtrair quantidade")
 
     @on(Button.Pressed, "#action-delete")
     def delete_entry(self) -> None:
-        self.run_worker(self._mutate_inventory("delete"), exclusive=True)
+        self._start_flow(lambda: self._mutate_inventory("delete"), "remover entrada")
 
     @on(Button.Pressed, "#action-skill")
     def actor_add_skill(self) -> None:
-        self.run_worker(self._actor_add_skill_flow(), exclusive=True)
+        self._start_flow(self._actor_add_skill_flow, "adicionar skill")
 
     async def _actor_add_skill_flow(self) -> None:
         actor_id = self._selected_actor_id()
@@ -586,7 +712,10 @@ class FearHungerTextualApp(App[None]):
             self.notify(f"{actor_name} ja conhece {entry.name}.", severity="warning")
 
     @on(Button.Pressed, "#action-revive")
-    async def actor_revive(self) -> None:
+    def actor_revive(self) -> None:
+        self._start_flow(self._actor_revive_flow, "reviver ator")
+
+    async def _actor_revive_flow(self) -> None:
         actor_id = self._selected_actor_id()
         if actor_id is None or self.session is None:
             return
@@ -597,7 +726,10 @@ class FearHungerTextualApp(App[None]):
         self.notify(f"{actor_name} revivido.")
 
     @on(Button.Pressed, "#action-infection")
-    async def actor_infection(self) -> None:
+    def actor_infection(self) -> None:
+        self._start_flow(self._actor_infection_flow, "curar infeccao")
+
+    async def _actor_infection_flow(self) -> None:
         actor_id = self._selected_actor_id()
         if actor_id is None or self.session is None:
             return
@@ -608,7 +740,10 @@ class FearHungerTextualApp(App[None]):
         self.notify(f"Infeccoes removidas de {actor_name}: {removed or 'nenhuma'}.")
 
     @on(Button.Pressed, "#action-arms")
-    async def actor_arms(self) -> None:
+    def actor_arms(self) -> None:
+        self._start_flow(self._actor_arms_flow, "restaurar bracos")
+
+    async def _actor_arms_flow(self) -> None:
         actor_id = self._selected_actor_id()
         if actor_id is None or self.session is None:
             return
@@ -622,7 +757,10 @@ class FearHungerTextualApp(App[None]):
             self.notify(f"Nenhum reparo de braco aplicavel para {actor_name}.", severity="warning")
 
     @on(Button.Pressed, "#action-party")
-    async def actor_party(self) -> None:
+    def actor_party(self) -> None:
+        self._start_flow(self._actor_party_flow, "adicionar a party")
+
+    async def _actor_party_flow(self) -> None:
         actor_id = self._selected_actor_id()
         if actor_id is None or self.session is None:
             return
@@ -637,7 +775,7 @@ class FearHungerTextualApp(App[None]):
 
     @on(Button.Pressed, "#action-unequip")
     def actor_unequip(self) -> None:
-        self.run_worker(self._actor_unequip_flow(), exclusive=True)
+        self._start_flow(self._actor_unequip_flow, "desequipar armor")
 
     async def _actor_unequip_flow(self) -> None:
         actor_id = self._selected_actor_id()
@@ -663,7 +801,7 @@ class FearHungerTextualApp(App[None]):
 
     @on(Button.Pressed, "#action-apply")
     def action_apply_button(self) -> None:
-        self.run_worker(self._review_and_apply(), exclusive=True)
+        self.action_apply_changes()
 
     async def _add_entry_flow(self) -> None:
         panel = self._current_panel()
@@ -675,7 +813,7 @@ class FearHungerTextualApp(App[None]):
         entry = await self._choose_catalog_entry(panel, query)
         if entry is None:
             return
-        quantity = await self._prompt_int("Quantidade inicial", 1)
+        quantity = await self._prompt_int("Quantidade inicial", 1, minimum=1)
         if quantity is None:
             return
         add_quantity(self.session.data, panel, entry.entry_id, quantity)
@@ -694,23 +832,16 @@ class FearHungerTextualApp(App[None]):
             confirmed = await self._await_screen_result(ConfirmScreen("Trocar de slot e perder alteracoes staged?"))
             if not confirmed:
                 return
-            self.session.close()
-        self._open_slot(slot)
+        new_session = await asyncio.to_thread(self.repo.open_session, slot)
+        old_session = self.session
+        self._install_session(new_session)
+        if old_session is not None:
+            await asyncio.to_thread(old_session.close)
         self.notify(f"Slot {slot.number} aberto.")
 
-    def _open_selected_slot_no_confirm(self) -> None:
-        slot = self._selected_slot()
-        if slot is None:
-            return
-        if self.current_slot_key == f"file{slot.number}" and self.session is not None:
-            return
-        if self.session is not None:
-            self.session.close()
-        self._open_slot(slot)
-
-    def _open_slot(self, slot: SaveSlot) -> None:
-        self.session = self.repo.open_session(slot)
-        self.current_slot_key = f"file{slot.number}"
+    def _install_session(self, session: SaveSession) -> None:
+        self.session = session
+        self.current_slot_key = f"file{session.slot.number}"
         self.inventory_selection = {"items": None, "weapons": None, "armors": None}
         self.actor_selection = None
         self._refresh_all_views()
@@ -730,9 +861,9 @@ class FearHungerTextualApp(App[None]):
         confirmed = await self._await_screen_result(ConfirmScreen(f"Restaurar {chosen.name} em file{slot.number}?"))
         if not confirmed:
             return
-        safety = self.repo.restore_backup(slot, backups[chosen.entry_id])
+        safety = await asyncio.to_thread(self.repo.restore_backup, slot, backups[chosen.entry_id])
         if self.session is not None and self.current_slot_key == f"file{slot.number}":
-            self.session.reload()
+            await asyncio.to_thread(self.session.reload)
             self._refresh_all_views()
         self.notify(f"Backup restaurado. Save anterior salvo em {safety.name}.")
 
@@ -747,7 +878,7 @@ class FearHungerTextualApp(App[None]):
         confirmed = await self._await_screen_result(ReviewScreen(lines, errors))
         if not confirmed:
             return
-        backup = self.session.apply()
+        backup = await asyncio.to_thread(self.session.apply)
         self._refresh_all_views()
         self.notify(f"Alteracoes aplicadas. Backup: {backup.name}")
 
@@ -777,7 +908,11 @@ class FearHungerTextualApp(App[None]):
             "plus": f"Somar quantidade em {entry.name}",
             "minus": f"Subtrair quantidade de {entry.name}",
         }[mode]
-        quantity = await self._prompt_int(title, current_qty if mode == "set" else 1)
+        quantity = await self._prompt_int(
+            title,
+            current_qty if mode == "set" else 1,
+            minimum=0 if mode == "set" else 1,
+        )
         if quantity is None:
             return
         if mode == "set":
@@ -802,15 +937,19 @@ class FearHungerTextualApp(App[None]):
             return None
         return self.catalog.entries_for_kind(kind)[chosen.entry_id]
 
-    async def _prompt_int(self, title: str, default: int) -> int | None:
+    async def _prompt_int(self, title: str, default: int, minimum: int | None = None) -> int | None:
         value = await self._await_screen_result(TextInputScreen(title, value=str(default)))
         if value is None:
             return None
         try:
-            return int(value)
+            parsed = int(value)
         except ValueError:
             self.notify("Numero invalido.", severity="error")
             return None
+        if minimum is not None and parsed < minimum:
+            self.notify(f"Use um numero maior ou igual a {minimum}.", severity="error")
+            return None
+        return parsed
 
     def _refresh_all_views(self) -> None:
         self._refresh_summary()
@@ -827,7 +966,7 @@ class FearHungerTextualApp(App[None]):
             view.update("Selecione um slot para começar.")
             return
         slot = self.session.slot
-        lines = [f"Slot: file{slot.number}.rpgsave", f"Dirty: {'sim' if self.session.dirty else 'nao'}", ""]
+        lines = [f"Slot: file{slot.number}.rpgsave", f"Alterado: {'sim' if self.session.dirty else 'nao'}", ""]
         lines.append("Party atual:")
         for actor_id in party_actor_ids(self.session.data):
             lines.append(f"- {actor_display_name(self.session.data, self.catalog, actor_id)} (ID {actor_id})")
@@ -907,20 +1046,35 @@ class FearHungerTextualApp(App[None]):
         detail.update("\n".join(lines[:20]))
 
     def _update_actions_visibility(self) -> None:
+        root = self.screen_stack[0]
         panel = self._current_panel()
         inventory_actions = {"action-add", "action-set", "action-plus", "action-minus", "action-delete"}
         actor_actions = {"action-skill", "action-revive", "action-infection", "action-arms", "action-party", "action-unequip"}
         all_actions = inventory_actions | actor_actions | {"action-apply"}
         for action_id in all_actions:
-            button = self.query_one(f"#{action_id}", Button)
+            button = root.query_one(f"#{action_id}", Button)
             button.display = False
         if panel in {"items", "weapons", "armors"}:
             for action_id in inventory_actions:
-                self.query_one(f"#{action_id}", Button).display = True
+                root.query_one(f"#{action_id}", Button).display = True
         elif panel == "actors":
             for action_id in actor_actions:
-                self.query_one(f"#{action_id}", Button).display = True
-        self.query_one("#action-apply", Button).display = self.session is not None
+                root.query_one(f"#{action_id}", Button).display = True
+        apply_button = root.query_one("#action-apply", Button)
+        apply_button.display = self.session is not None
+
+        has_session = self.session is not None
+        selected_inventory = panel in self.inventory_selection and self.inventory_selection.get(panel) is not None
+        selected_actor = self.actor_selection is not None
+        for action_id in ("action-set", "action-plus", "action-minus", "action-delete"):
+            root.query_one(f"#{action_id}", Button).disabled = self.operation_in_progress or not selected_inventory
+        root.query_one("#action-add", Button).disabled = self.operation_in_progress or not has_session
+        for action_id in ("action-skill", "action-revive", "action-infection", "action-arms", "action-party", "action-unequip"):
+            root.query_one(f"#{action_id}", Button).disabled = self.operation_in_progress or not selected_actor
+        apply_button.disabled = self.operation_in_progress or not has_session or not bool(self.session and self.session.dirty)
+        for action_id in ("open-slot", "backup-slot", "restore-slot", "refresh-slots"):
+            root.query_one(f"#{action_id}", Button).disabled = self.operation_in_progress
+        root.query_one("#slots", ListView).disabled = self.operation_in_progress
 
     def _selected_slot(self) -> SaveSlot | None:
         list_view = self.query_one("#slots", ListView)
@@ -933,7 +1087,7 @@ class FearHungerTextualApp(App[None]):
         return self.actor_selection
 
     def _current_panel(self) -> str:
-        return self.query_one("#tabs", TabbedContent).active or "summary"
+        return self.screen_stack[0].query_one("#tabs", TabbedContent).active or "summary"
 
     def _actor_list(self) -> list[int]:
         if self.session is None:
@@ -964,8 +1118,12 @@ class FearHungerTextualApp(App[None]):
                 break
 
     def _update_slot_meta(self, slot: SaveSlot) -> None:
-        modified = slot.path.stat().st_mtime
-        backups = self.repo.list_backups(slot)
+        try:
+            modified = slot.path.stat().st_mtime
+            backups = self.repo.list_backups(slot)
+        except OSError:
+            modified = 0
+            backups = []
         self.query_one("#slot-meta", Static).update(
             f"file{slot.number}\nBackups: {len(backups)}\nPath: {slot.path}\nMtime: {modified:.0f}"
         )

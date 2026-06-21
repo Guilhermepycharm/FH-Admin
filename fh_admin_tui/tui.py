@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import curses
 import textwrap
+import traceback
 from dataclasses import dataclass
 
 from .catalog import Catalog, Entry
+from .diagnostics import LOG_PATH, configure_logging, get_logger
 from .mutations import (
     ARM_REPAIR_CONFIG,
     actor_display_name,
@@ -604,5 +606,15 @@ class FearHungerAdminTUI:
 
 
 def main() -> int:
-    curses.wrapper(lambda stdscr: FearHungerAdminTUI().run(stdscr))
-    return 0
+    configure_logging()
+    logger = get_logger("legacy_tui")
+    try:
+        curses.wrapper(lambda stdscr: FearHungerAdminTUI().run(stdscr))
+        return 0
+    except KeyboardInterrupt:
+        return 130
+    except Exception:
+        logger.exception("Falha fatal no TUI legado")
+        traceback.print_exc()
+        print(f"Detalhes registrados em {LOG_PATH}")
+        return 1
