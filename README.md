@@ -75,7 +75,6 @@ Exemplo com variáveis de ambiente:
 export FH_GAME_ROOT="$HOME/.local/share/Steam/steamapps/common/Fear & Hunger/www"
 export FH_SAVE_DIR="$FH_GAME_ROOT/save"
 export FH_DATA_DIR="$FH_GAME_ROOT/data"
-export FH_CODEC_SCRIPT="$HOME/.local/share/fh-admin-tui/rpgsave_codec.js"
 export FH_BACKUP_DIR="$HOME/fh-save-backups"
 ./run.py
 ```
@@ -85,7 +84,6 @@ Exemplo com argumentos:
 ```bash
 ./run.py \
   --game-root "$HOME/.local/share/Steam/steamapps/common/Fear & Hunger/www" \
-  --codec-script "$HOME/.local/share/fh-admin-tui/rpgsave_codec.js" \
   --backup-dir "$HOME/fh-save-backups"
 ```
 
@@ -188,7 +186,7 @@ Este projeto edita arquivos de save. Embora o apply crie backup automático e va
 
 - `Dependência ausente: textual`: crie a `.venv` e rode `.venv/bin/python -m pip install -e '.[dev]'`.
 - `Pasta de saves nao encontrada`: configure `FH_GAME_ROOT` ou `FH_SAVE_DIR`.
-- `Arquivo de script do codec nao encontrado`: configure `FH_CODEC_SCRIPT` para o `rpgsave_codec.js` correto.
+- `Arquivo de script do codec nao encontrado`: reinstale o projeto; o codec vem incluso no pacote. `FH_CODEC_SCRIPT` pode sobrescrever o caminho para desenvolvimento.
 - `Arquivo de lz-string nao encontrado`: confirme que `FH_GAME_ROOT` aponta para a pasta `www` do jogo.
 - Falha fatal na UI: consulte `~/.local/state/fh-admin-tui/fh-admin-tui.log`.
 

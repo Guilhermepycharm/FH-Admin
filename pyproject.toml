@@ -25,3 +25,6 @@ fh-admin-tui = "fh_admin_tui.textual_app:main"
 
 [tool.setuptools.packages.find]
 include = ["fh_admin_tui*"]
+
+[tool.setuptools.package-data]
+fh_admin_tui = ["resources/*.js"]

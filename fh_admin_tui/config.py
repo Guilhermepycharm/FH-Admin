@@ -22,7 +22,7 @@ def _default_game_root() -> Path:
 
 
 def _default_codec_script() -> Path:
-    return Path.home() / ".local" / "share" / "fh-admin-tui" / "rpgsave_codec.js"
+    return Path(__file__).resolve().parent / "resources" / "rpgsave_codec.js"
 
 
 @dataclass(frozen=True)

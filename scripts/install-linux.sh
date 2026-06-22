@@ -69,5 +69,5 @@ Para rodar:
   ./run.py
 
 Se o jogo estiver em outro lugar, configure:
-  ./run.py --game-root "/caminho/para/Fear & Hunger/www" --codec-script "$HOME/.local/share/fh-admin-tui/rpgsave_codec.js"
+  ./run.py --game-root "/caminho/para/Fear & Hunger/www"
 MSG

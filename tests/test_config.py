@@ -34,6 +34,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.save_dir, game_root / "save")
             self.assertEqual(config.data_dir, game_root / "data")
             self.assertEqual(config.lz_string_path, game_root / "js" / "libs" / "lz-string.js")
+            self.assertEqual(config.codec_script.name, "rpgsave_codec.js")
+            self.assertTrue(config.codec_script.is_file())
 
     def test_game_root_override_moves_default_save_and_data_dirs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="fh-config-override-") as temp_dir:
