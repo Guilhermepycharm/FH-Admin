@@ -141,12 +141,16 @@ def party_actor_ids(data: dict) -> list[int]:
 
 
 def actor_display_name(data: dict, catalog: Catalog, actor_id: int) -> str:
-    actor = get_actor(data, actor_id)
+    try:
+        actor = get_actor(data, actor_id)
+    except KeyError:
+        catalog_actor = catalog.actors.get(actor_id)
+        return catalog_actor.name if catalog_actor is not None else f"Personagem {actor_id}"
     save_name = str(actor.get("_name") or "").strip()
     if save_name:
         return save_name
     catalog_actor = catalog.actors.get(actor_id)
-    return catalog_actor.name if catalog_actor is not None else f"Actor {actor_id}"
+    return catalog_actor.name if catalog_actor is not None else f"Personagem {actor_id}"
 
 
 def add_skill(data: dict, actor_id: int, skill_id: int) -> bool:
@@ -360,41 +364,41 @@ def validate_data(data: dict) -> list[str]:
 
     for actor_id in party:
         if not isinstance(actor_id, int) or actor_id <= 0 or actor_id >= len(actors) or actors[actor_id] is None:
-            errors.append(f"party contem ator invalido: {actor_id!r}")
+            errors.append(f"party contem personagem invalido: {actor_id!r}")
 
     for actor_id, actor in enumerate(actors):
         if actor_id == 0 or actor is None:
             continue
         if not isinstance(actor, dict):
-            errors.append(f"ator {actor_id} possui estrutura invalida")
+            errors.append(f"personagem {actor_id} possui estrutura invalida")
             continue
         hp = actor.get("_hp", 0)
         if not isinstance(hp, (int, float)):
-            errors.append(f"ator {actor_id} com HP nao numerico")
+            errors.append(f"personagem {actor_id} com HP nao numerico")
         elif hp < 0:
-            errors.append(f"ator {actor_id} com HP negativo")
+            errors.append(f"personagem {actor_id} com HP negativo")
         try:
             equips = actor["_equips"]["@a"]
         except (KeyError, TypeError):
-            errors.append(f"ator {actor_id} sem estrutura de equipamentos")
+            errors.append(f"personagem {actor_id} sem estrutura de equipamentos")
             continue
         if not isinstance(equips, list):
-            errors.append(f"ator {actor_id} com equipamentos invalidos")
+            errors.append(f"personagem {actor_id} com equipamentos invalidos")
             continue
         for equip in equips:
             if not isinstance(equip, dict):
-                errors.append(f"ator {actor_id} possui equip invalido")
+                errors.append(f"personagem {actor_id} possui equip invalido")
                 continue
             data_class = equip.get("_dataClass")
             try:
                 item_id = int(equip.get("_itemId", 0))
             except (TypeError, ValueError):
-                errors.append(f"ator {actor_id} possui _itemId invalido")
+                errors.append(f"personagem {actor_id} possui _itemId invalido")
                 continue
             if item_id < 0:
-                errors.append(f"ator {actor_id} possui equip com item negativo")
+                errors.append(f"personagem {actor_id} possui equip com item negativo")
             if data_class not in ("", "weapon", "armor"):
-                errors.append(f"ator {actor_id} possui _dataClass invalido: {data_class!r}")
+                errors.append(f"personagem {actor_id} possui _dataClass invalido: {data_class!r}")
 
     return errors
 
@@ -439,7 +443,7 @@ def diff_summary_lines(baseline: dict, current: dict, catalog: Catalog) -> list[
         after_actor = get_actor(current, actor_id)
         if before_actor.get("_hp") != after_actor.get("_hp"):
             lines.append(
-                f"Ator {actor_display_name(current, catalog, actor_id)}: HP {before_actor.get('_hp')} -> {after_actor.get('_hp')}"
+                f"Personagem {actor_display_name(current, catalog, actor_id)}: HP {before_actor.get('_hp')} -> {after_actor.get('_hp')}"
             )
 
         before_states = set(before_actor["_states"]["@a"])
@@ -447,24 +451,24 @@ def diff_summary_lines(baseline: dict, current: dict, catalog: Catalog) -> list[
         for state_id in sorted(before_states - after_states)[:5]:
             state = catalog.states.get(state_id)
             state_name = state.name if state and state.name else f"state {state_id}"
-            lines.append(f"Ator {actor_display_name(current, catalog, actor_id)}: removeu estado {state_name}")
+            lines.append(f"Personagem {actor_display_name(current, catalog, actor_id)}: removeu estado {state_name}")
         for state_id in sorted(after_states - before_states)[:5]:
             state = catalog.states.get(state_id)
             state_name = state.name if state and state.name else f"state {state_id}"
-            lines.append(f"Ator {actor_display_name(current, catalog, actor_id)}: ganhou estado {state_name}")
+            lines.append(f"Personagem {actor_display_name(current, catalog, actor_id)}: ganhou estado {state_name}")
 
         before_skills = set(before_actor["_skills"]["@a"])
         after_skills = set(after_actor["_skills"]["@a"])
         for skill_id in sorted(after_skills - before_skills)[:5]:
             skill = catalog.skills.get(skill_id)
             skill_name = skill.name if skill else f"skill {skill_id}"
-            lines.append(f"Ator {actor_display_name(current, catalog, actor_id)}: aprendeu {skill_name}")
+            lines.append(f"Personagem {actor_display_name(current, catalog, actor_id)}: aprendeu {skill_name}")
 
         before_equips = equipped_armor_ids(baseline, actor_id)
         after_equips = equipped_armor_ids(current, actor_id)
         if before_equips != after_equips:
             lines.append(
-                f"Ator {actor_display_name(current, catalog, actor_id)}: armaduras {before_equips} -> {after_equips}"
+                f"Personagem {actor_display_name(current, catalog, actor_id)}: armaduras {before_equips} -> {after_equips}"
             )
 
         limb_config = LIMB_REPAIR_CONFIG.get(actor_id)
@@ -481,7 +485,7 @@ def diff_summary_lines(baseline: dict, current: dict, catalog: Catalog) -> list[
             ]
             if restored_switches:
                 lines.append(
-                    f"Ator {actor_display_name(current, catalog, actor_id)}: restaurou membros {restored_switches}"
+                    f"Personagem {actor_display_name(current, catalog, actor_id)}: restaurou membros {restored_switches}"
                 )
 
     return lines or ["Nenhuma alteracao staged."]

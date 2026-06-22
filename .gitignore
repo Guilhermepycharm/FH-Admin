@@ -8,3 +8,14 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+
+# Local runtime state
+.env
+.env.*
+*.tmp
+*.bak
+
+# Fear & Hunger local data
+*.rpgsave
+*backup*.rpgsave
+fear and hunger saves/

@@ -1,3 +1,10 @@
+"""Legacy curses interface kept outside the primary Textual path.
+
+The supported application entrypoint is fh_admin_tui.textual_app. This module is
+kept for compatibility while save/domain behavior is shared through save_ops and
+mutations.
+"""
+
 from __future__ import annotations
 
 import curses
@@ -34,7 +41,7 @@ PANEL_NAMES = {
     "items": "Itens",
     "weapons": "Armas",
     "armors": "Armaduras",
-    "actors": "Atores",
+    "actors": "Personagens",
 }
 
 
@@ -95,7 +102,7 @@ class FearHungerAdminTUI:
         dirty = " *ALTERADO*" if self.session.dirty else ""
         title = f"Slot {self.session.slot.number}{dirty}"
         self._draw_header(stdscr, title, width)
-        nav = "1 Resumo  2 Itens  3 Armas  4 Armaduras  5 Atores"
+        nav = "1 Resumo  2 Itens  3 Armas  4 Armaduras  5 Personagens"
         stdscr.addstr(2, 2, self._trim(nav, width - 4))
 
         if self.panel == "summary":
@@ -133,7 +140,7 @@ class FearHungerAdminTUI:
             y += 1
 
         y += 1
-        stdscr.addstr(y, 2, "Atores com reparo especial suportado")
+        stdscr.addstr(y, 2, "Personagens com reparo especial suportado")
         y += 1
         for actor_id, config in ARM_REPAIR_CONFIG.items():
             actor_name = actor_display_name(self.session.data, self.catalog, actor_id)
@@ -188,7 +195,7 @@ class FearHungerAdminTUI:
         height, width = stdscr.getmaxyx()
         actor_list = self._actor_list()
         self.actor_index = min(self.actor_index, max(len(actor_list) - 1, 0))
-        stdscr.addstr(4, 2, "Atores")
+        stdscr.addstr(4, 2, "Personagens")
         left_width = max(30, width // 2)
 
         visible_rows = max(5, height - 10)
@@ -203,7 +210,7 @@ class FearHungerAdminTUI:
             stdscr.addstr(y, 4, self._trim(text, left_width - 6), style)
 
         if not actor_list:
-            stdscr.addstr(6, 4, "Nenhum ator no save.")
+            stdscr.addstr(6, 4, "Nenhum personagem no save.")
             return
 
         actor_id = actor_list[self.actor_index]

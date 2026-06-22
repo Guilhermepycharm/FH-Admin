@@ -9,20 +9,34 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
+from .config import AppConfig
 from .mutations import validate_data
-
-
-GAME_ROOT = Path("/home/kim/.local/share/Steam/steamapps/common/Fear & Hunger/www")
-SAVE_DIR = GAME_ROOT / "save"
-DATA_DIR = GAME_ROOT / "data"
-LZ_STRING_PATH = GAME_ROOT / "js" / "libs" / "lz-string.js"
-CODEC_SCRIPT = Path("/home/kim/.codex/skills/fh-save-editor/scripts/rpgsave_codec.js")
-BACKUP_DIR = Path.home() / "fear and hunger saves"
 
 
 class SaveOperationError(RuntimeError):
     pass
+
+
+class SaveCodec(Protocol):
+    def decode(self, input_path: Path, output_path: Path) -> None:
+        ...
+
+    def encode(self, input_path: Path, output_path: Path) -> None:
+        ...
+
+
+class NodeSaveCodec:
+    def __init__(self, codec_script: Path, lz_string_path: Path) -> None:
+        self.codec_script = codec_script
+        self.lz_string_path = lz_string_path
+
+    def decode(self, input_path: Path, output_path: Path) -> None:
+        _run_codec("decode", input_path, output_path, self.codec_script, self.lz_string_path)
+
+    def encode(self, input_path: Path, output_path: Path) -> None:
+        _run_codec("encode", input_path, output_path, self.codec_script, self.lz_string_path)
 
 
 def load_json_like(path: Path) -> dict:
@@ -42,17 +56,25 @@ class SaveSlot:
 class SaveRepository:
     def __init__(
         self,
-        save_dir: Path = SAVE_DIR,
-        data_dir: Path = DATA_DIR,
-        lz_string_path: Path = LZ_STRING_PATH,
-        codec_script: Path = CODEC_SCRIPT,
-        backup_dir: Path = BACKUP_DIR,
+        save_dir: Path | None = None,
+        data_dir: Path | None = None,
+        lz_string_path: Path | None = None,
+        codec_script: Path | None = None,
+        backup_dir: Path | None = None,
+        codec: SaveCodec | None = None,
+        config: AppConfig | None = None,
     ) -> None:
-        self.save_dir = save_dir
-        self.data_dir = data_dir
-        self.lz_string_path = lz_string_path
-        self.codec_script = codec_script
-        self.backup_dir = backup_dir
+        resolved = config or AppConfig.from_env()
+        self.save_dir = save_dir or resolved.save_dir
+        self.data_dir = data_dir or resolved.data_dir
+        self.lz_string_path = lz_string_path or resolved.lz_string_path
+        self.codec_script = codec_script or resolved.codec_script
+        self.backup_dir = backup_dir or resolved.backup_dir
+        self.codec = codec or NodeSaveCodec(self.codec_script, self.lz_string_path)
+
+    @classmethod
+    def from_config(cls, config: AppConfig) -> "SaveRepository":
+        return cls(config=config)
 
     def list_slots(self) -> list[SaveSlot]:
         if not self.save_dir.is_dir():
@@ -83,6 +105,7 @@ class SaveRepository:
     def restore_backup(self, slot: SaveSlot, backup_path: Path) -> Path:
         if not backup_path.is_file():
             raise SaveOperationError(f"Backup nao encontrado: {backup_path}")
+        self.validate_encoded_save(backup_path, f"backup {backup_path.name}")
         safety_backup = self.create_backup(slot)
         _atomic_copy(backup_path, slot.path)
         return safety_backup
@@ -91,10 +114,20 @@ class SaveRepository:
         return SaveSession(self, slot)
 
     def decode(self, input_path: Path, output_path: Path) -> None:
-        _run_codec("decode", input_path, output_path, self.codec_script, self.lz_string_path)
+        self.codec.decode(input_path, output_path)
 
     def encode(self, input_path: Path, output_path: Path) -> None:
-        _run_codec("encode", input_path, output_path, self.codec_script, self.lz_string_path)
+        self.codec.encode(input_path, output_path)
+
+    def validate_encoded_save(self, encoded_path: Path, context: str) -> dict:
+        with tempfile.TemporaryDirectory(prefix="fh-validate-") as temp_dir:
+            decoded_path = Path(temp_dir) / "decoded.json"
+            self.decode(encoded_path, decoded_path)
+            data = load_json_like(decoded_path)
+        errors = validate_data(data)
+        if errors:
+            raise SaveOperationError(f"{context} invalido: " + "; ".join(errors[:10]))
+        return data
 
 
 class SaveSession:
@@ -133,7 +166,12 @@ class SaveSession:
         dump_json_like(self.data, self.decoded_path)
         self.repo.encode(self.decoded_path, self.encoded_path)
         self.repo.decode(self.encoded_path, self.validation_path)
-        load_json_like(self.validation_path)
+        round_trip_data = load_json_like(self.validation_path)
+        round_trip_errors = validate_data(round_trip_data)
+        if round_trip_errors:
+            raise SaveOperationError("codec gerou save invalido: " + "; ".join(round_trip_errors[:10]))
+        if round_trip_data != self.data:
+            raise SaveOperationError("codec round-trip alterou os dados staged; save original preservado")
         _atomic_copy(self.encoded_path, self.slot.path)
         self.baseline = copy.deepcopy(self.data)
         self.dirty = False

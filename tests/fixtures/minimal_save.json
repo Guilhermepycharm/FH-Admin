@@ -1,0 +1,33 @@
+{
+  "party": {
+    "_items": {"1": 2},
+    "_weapons": {"2": 1},
+    "_armors": {"3": 1},
+    "_actors": {"@a": [1]}
+  },
+  "actors": {
+    "_data": {
+      "@a": [
+        null,
+        {
+          "_name": "Cahara",
+          "_states": {"@a": [3, 55]},
+          "_stateTurns": {"3": 2, "55": 2},
+          "_stateSteps": {"3": 2, "55": 2},
+          "_skills": {"@a": [7]},
+          "_equips": {"@a": [{"_dataClass": "armor", "_itemId": 3}]},
+          "_hp": 12,
+          "_hidden": false,
+          "_baseParamCache": {"@a": [25]},
+          "_characterName": "mercenary",
+          "_characterIndex": 0,
+          "_faceName": "Actor1",
+          "_faceIndex": 0,
+          "_battlerName": "mercenary"
+        }
+      ]
+    }
+  },
+  "switches": {"_data": {"@a": []}},
+  "variables": {"_data": {"@a": []}}
+}
