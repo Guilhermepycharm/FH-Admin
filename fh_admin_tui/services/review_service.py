@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fh_admin_tui.catalog import Catalog
-from fh_admin_tui.mutations import diff_summary_lines, validate_data
+from fh_admin_tui.domain.change_summary import diff_summary_lines
+from fh_admin_tui.domain.save_validation import validate_data
 
 
 @dataclass(frozen=True)

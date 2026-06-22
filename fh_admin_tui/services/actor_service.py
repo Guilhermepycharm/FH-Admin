@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fh_admin_tui.catalog import Catalog, Entry
-from fh_admin_tui.mutations import (
+from fh_admin_tui.domain.character_rules import (
     LIMB_REPAIR_CONFIG,
     actor_display_name,
     actor_ids,

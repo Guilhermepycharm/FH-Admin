@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fh_admin_tui.catalog import Catalog, Entry
-from fh_admin_tui.mutations import add_quantity, list_owned_entries, set_quantity
+from fh_admin_tui.domain.inventory_rules import add_quantity, list_owned_entries, set_quantity
 from fh_admin_tui.services.results import QuantityMutationResult
 
 

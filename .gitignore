@@ -19,3 +19,6 @@ dist/
 *.rpgsave
 *backup*.rpgsave
 fear and hunger saves/
+
+# FH Admin local configuration
+.fh-admin-tui.env

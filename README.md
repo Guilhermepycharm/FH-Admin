@@ -47,6 +47,14 @@ Se você já instalou as dependências de sistema e quer pular essa etapa:
 FH_ADMIN_SKIP_SYSTEM_DEPS=1 ./scripts/install-linux.sh
 ```
 
+Para remover apenas os atalhos de usuário criados pelo instalador:
+
+```bash
+./scripts/uninstall-linux.sh
+```
+
+O uninstall não remove saves nem backups. Use `--config` para remover `.fh-admin-tui.env` e `--venv` para remover a venv local.
+
 Em NixOS, também dá para rodar sem instalar globalmente:
 
 ```bash
@@ -60,6 +68,8 @@ Por padrão, o app tenta usar:
 ```text
 ~/.local/share/Steam/steamapps/common/Fear & Hunger/www
 ```
+
+O comando `./run.py configure` salva esses valores em `.fh-admin-tui.env`, que fica ignorado pelo Git. Também é possível configurar por variáveis de ambiente.
 
 Variáveis aceitas:
 
@@ -95,6 +105,35 @@ No checkout do projeto:
 ./run.py
 ```
 
+Depois de rodar `./scripts/install-linux.sh`, abra um novo terminal e use:
+
+```bash
+fh-admin-tui
+fh admin tui
+```
+
+Configurar paths pela primeira vez:
+
+```bash
+./run.py setup
+# ou, depois do instalador:
+fh admin tui setup
+```
+
+O setup abre um menu interativo para detectar o jogo, informar a pasta `www`, rodar diagnóstico e abrir o editor.
+
+Também dá para rodar a configuração manual direta:
+
+```bash
+./run.py configure
+```
+
+Diagnóstico de configuração e dependências:
+
+```bash
+./run.py doctor
+```
+
 Depois de instalar com `pip install -e .`, o entrypoint também fica disponível:
 
 ```bash
@@ -121,13 +160,14 @@ Atalhos principais:
 ## Estrutura do projeto
 
 - `fh_admin_tui/config.py`: resolução de paths, variáveis de ambiente, defaults e validação de runtime.
-- `fh_admin_tui/mutations.py`: mutações e regras puras sobre a estrutura do save.
+- `fh_admin_tui/domain/`: regras testáveis de inventário, personagens, validação e resumo de alterações.
+- `fh_admin_tui/mutations.py`: fachada de compatibilidade para imports antigos; código novo deve usar `domain/`.
 - `fh_admin_tui/save_ops.py`: IO, backup, codec, sessão de edição e escrita atômica.
-- `fh_admin_tui/textual_app.py`: shell principal da aplicação Textual, eventos, seleção e renderização.
+- `fh_admin_tui/textual_app.py`: shell principal da aplicação Textual, seleção, eventos e ligação com controllers.
 - `fh_admin_tui/controllers/`: fluxos Textual que orquestram modais, confirmações e chamadas de serviços.
 - `fh_admin_tui/services/`: casos de uso de inventory, personagens e revisão antes do apply.
 - `fh_admin_tui/ui/`: layout, telas/modais e helpers de renderização.
-- `fh_admin_tui/tui.py`: interface curses legada/deprecada; não é o caminho principal recomendado.
+- `fh_admin_tui/legacy/tui.py`: interface curses legada/deprecada; não é o caminho principal recomendado.
 - `scripts/install-linux.sh`: instalador simples para distros Linux comuns.
 - `tests/fixtures/`: saves e catálogos mínimos falsos para testes sem jogo instalado.
 
@@ -151,14 +191,19 @@ PYTHONPYCACHEPREFIX=/tmp/fh-admin-tui-pycache python -m py_compile \
   fh_admin_tui/services/results.py \
   fh_admin_tui/services/actor_service.py \
   fh_admin_tui/services/inventory_service.py \
+  fh_admin_tui/domain/inventory_rules.py \
+  fh_admin_tui/domain/character_rules.py \
+  fh_admin_tui/domain/save_validation.py \
+  fh_admin_tui/domain/change_summary.py \
   fh_admin_tui/services/review_service.py \
   fh_admin_tui/controllers/textual_actions.py \
+  fh_admin_tui/doctor.py \
   fh_admin_tui/textual_app.py
 ```
 
 ## Testes
 
-A suíte usa `unittest` e fixtures falsas, então não depende de um save real instalado no computador do desenvolvedor.
+A suíte usa `unittest` e fixtures falsas, então não depende de um save real instalado no computador do desenvolvedor. O repositório também possui workflow de GitHub Actions para rodar testes, compile check e `node --check` no codec empacotado.
 
 Cobertura atual:
 
@@ -185,7 +230,8 @@ Este projeto edita arquivos de save. Embora o apply crie backup automático e va
 ## Troubleshooting
 
 - `Dependência ausente: textual`: crie a `.venv` e rode `.venv/bin/python -m pip install -e '.[dev]'`.
-- `Pasta de saves nao encontrada`: configure `FH_GAME_ROOT` ou `FH_SAVE_DIR`.
+- `Pasta de saves nao encontrada`: rode `./run.py setup` ou configure `FH_GAME_ROOT`/`FH_SAVE_DIR`.
+- `Arquivos ausentes em data`: rode `./run.py setup` e confirme que o game root aponta para a pasta `www` correta.
 - `Arquivo de script do codec nao encontrado`: reinstale o projeto; o codec vem incluso no pacote. `FH_CODEC_SCRIPT` pode sobrescrever o caminho para desenvolvimento.
 - `Arquivo de lz-string nao encontrado`: confirme que `FH_GAME_ROOT` aponta para a pasta `www` do jogo.
 - Falha fatal na UI: consulte `~/.local/state/fh-admin-tui/fh-admin-tui.log`.

@@ -1,0 +1,52 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install package
+        run: python -m pip install -e '.[dev]'
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Compile Python modules
+        run: |
+          PYTHONPYCACHEPREFIX=/tmp/fh-admin-tui-pycache python -m py_compile \
+            fh_admin_tui/config.py \
+            fh_admin_tui/save_ops.py \
+            fh_admin_tui/ui/screens.py \
+            fh_admin_tui/ui/rendering.py \
+            fh_admin_tui/ui/layout.py \
+            fh_admin_tui/services/results.py \
+            fh_admin_tui/services/actor_service.py \
+            fh_admin_tui/services/inventory_service.py \
+            fh_admin_tui/domain/inventory_rules.py \
+            fh_admin_tui/domain/character_rules.py \
+            fh_admin_tui/domain/save_validation.py \
+            fh_admin_tui/domain/change_summary.py \
+            fh_admin_tui/services/review_service.py \
+            fh_admin_tui/controllers/textual_actions.py \
+            fh_admin_tui/doctor.py \
+            fh_admin_tui/textual_app.py \
+            fh_admin_tui/legacy/tui.py
+
+      - name: Check bundled codec syntax
+        run: node --check fh_admin_tui/resources/rpgsave_codec.js

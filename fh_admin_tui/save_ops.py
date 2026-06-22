@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .config import AppConfig
-from .mutations import validate_data
+from .domain.save_validation import validate_data
 
 
 class SaveOperationError(RuntimeError):

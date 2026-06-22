@@ -30,6 +30,8 @@ from .ui.rendering import (
 from .ui.screens import ConfirmScreen
 
 logger = get_logger("textual")
+EDITOR_TABLE_IDS = {"items-table", "weapons-table", "armors-table", "actors-table"}
+
 
 class FearHungerTextualApp(App[None]):
     CSS = APP_CSS
@@ -201,14 +203,14 @@ class FearHungerTextualApp(App[None]):
 
     @on(ListView.Selected, "#slots")
     def slot_selected(self, event: ListView.Selected) -> None:
-        if isinstance(self.screen, ModalScreen):
+        if self._current_screen_is_modal():
             return
         if event.item and event.item.id and event.item.id in self.slot_lookup:
             self._update_slot_meta(self.slot_lookup[event.item.id])
 
     @on(ListView.Highlighted, "#slots")
     def slot_highlighted(self, event: ListView.Highlighted) -> None:
-        if isinstance(self.screen, ModalScreen):
+        if self._current_screen_is_modal():
             return
         if event.item and event.item.id and event.item.id in self.slot_lookup:
             self._update_slot_meta(self.slot_lookup[event.item.id])
@@ -231,19 +233,14 @@ class FearHungerTextualApp(App[None]):
 
     @on(TabbedContent.TabActivated, "#tabs")
     def tab_changed(self) -> None:
-        if isinstance(self.screen, ModalScreen):
+        if self._current_screen_is_modal():
             return
         self._update_actions_visibility()
         self._refresh_detail_panel()
 
     @on(DataTable.RowHighlighted)
     def table_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if isinstance(self.screen, ModalScreen) or event.data_table.id not in {
-            "items-table",
-            "weapons-table",
-            "armors-table",
-            "actors-table",
-        }:
+        if self._current_screen_is_modal() or event.data_table.id not in EDITOR_TABLE_IDS:
             return
         self._store_selection(event.data_table)
         self._refresh_detail_panel()
@@ -251,12 +248,7 @@ class FearHungerTextualApp(App[None]):
 
     @on(DataTable.RowSelected)
     def table_selected(self, event: DataTable.RowSelected) -> None:
-        if isinstance(self.screen, ModalScreen) or event.data_table.id not in {
-            "items-table",
-            "weapons-table",
-            "armors-table",
-            "actors-table",
-        }:
+        if self._current_screen_is_modal() or event.data_table.id not in EDITOR_TABLE_IDS:
             return
         self._store_selection(event.data_table)
         self._refresh_detail_panel()
@@ -369,7 +361,12 @@ class FearHungerTextualApp(App[None]):
             self._restore_table_cursor(table, str(self.actor_selection))
 
     def _refresh_detail_panel(self) -> None:
-        detail = self.query_one("#detail-view", Static)
+        if not self.screen_stack:
+            return
+        try:
+            detail = self.query_one("#detail-view", Static)
+        except NoMatches:
+            return
         if self.session is None:
             detail.update("Nenhum slot aberto.")
             return
@@ -383,8 +380,13 @@ class FearHungerTextualApp(App[None]):
         detail.update(staged_detail_text(self.session, self.catalog))
 
     def _update_actions_visibility(self) -> None:
+        if not self.screen_stack:
+            return
         root = self.screen_stack[0]
-        panel = self._current_panel()
+        try:
+            panel = self._current_panel()
+        except NoMatches:
+            return
         inventory_actions = {"action-add", "action-set", "action-plus", "action-minus", "action-delete"}
         actor_actions = {
             "action-skill",
@@ -446,7 +448,12 @@ class FearHungerTextualApp(App[None]):
     def _selected_actor_id(self) -> int | None:
         return self.actor_selection
 
+    def _current_screen_is_modal(self) -> bool:
+        return bool(self.screen_stack) and isinstance(self.screen_stack[-1], ModalScreen)
+
     def _current_panel(self) -> str:
+        if not self.screen_stack:
+            return "summary"
         return self.screen_stack[0].query_one("#tabs", TabbedContent).active or "summary"
 
     def _actor_list(self) -> list[int]:
