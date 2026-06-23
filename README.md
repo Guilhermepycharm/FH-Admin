@@ -1,240 +1,279 @@
 # Fear & Hunger Admin TUI
 
-Editor TUI para saves de **Fear & Hunger 1**, feito em Python com Textual. O objetivo é editar saves com mais segurança do que mexer manualmente nos arquivos: o app trabalha em cópia temporária, cria backups automáticos e só grava no save original depois de validação.
-
-## English summary
-
-Fear & Hunger Admin TUI is an early-stage terminal save editor for **Fear & Hunger 1**. It can inspect save slots, edit common inventory and character data, and apply changes with automatic backups. Main usage commands are documented in [Como executar](#como-executar), and configuration is controlled through CLI arguments or environment variables.
+Editor TUI para saves de **Fear & Hunger 1**, feito em Python com Textual. O app abre os saves em uma cópia temporária, mostra as alterações para revisão, cria backup automático e só grava no save original depois de validar o resultado.
 
 ## Status
 
-Este é um projeto em desenvolvimento. Ele já tem testes unitários, fixtures falsas e validações antes de gravar, mas ainda deve ser usado com cuidado. Faça backup dos saves antes de editar qualquer arquivo importante.
+Projeto em desenvolvimento. Já possui fixtures falsas, testes unitários, testes de fluxo Textual e validações antes de gravar, mas ainda é um editor de save: mantenha cópias externas dos saves importantes.
 
-A interface principal suportada é a Textual. A interface curses em `fh_admin_tui/tui.py` é legado/deprecada e existe apenas por compatibilidade enquanto o fluxo Textual amadurece.
+A interface principal suportada é a Textual. A antiga interface curses foi movida para `fh_admin_tui/legacy/tui.py` e fica fora do caminho principal.
 
 ## Recursos
 
 - Lista slots `file*.rpgsave` em `www/save`.
 - Decodifica o save para uma cópia temporária de trabalho.
 - Edita itens, armas, armaduras, skills, party, revive, infecções, ferimentos e membros ausentes mapeados.
-- Cria backup antes de aplicar alterações.
+- Mostra revisão antes do apply.
+- Cria backup automático antes de aplicar alterações.
 - Cria backup de segurança antes de restaurar outro backup.
-- Valida a estrutura básica do save antes de gravar.
-- Faz encode, decodifica o resultado para validação e substitui o save original de forma atômica.
-- Permite configurar paths por variáveis de ambiente ou argumentos CLI.
+- Valida estrutura do save, codec, catálogo do jogo e round-trip antes de gravar.
+- Permite configurar caminhos por setup interativo, arquivo local, variáveis de ambiente ou argumentos CLI.
 
 ## Instalação
+
+Clone e instale:
 
 ```bash
 git clone https://github.com/Guilhermepycharm/FH-Admin.git fh-admin-tui
 cd fh-admin-tui
-python3 -m venv .venv
-.venv/bin/python -m ensurepip --upgrade
-.venv/bin/python -m pip install -e '.[dev]'
-```
-
-`./run.py` detecta a `.venv` local e reexecuta com ela automaticamente.
-
-Script de instalação para Ubuntu, Fedora, Arch, openSUSE/SUSE, Gentoo e Artix:
-
-```bash
 ./scripts/install-linux.sh
 ```
 
-Se você já instalou as dependências de sistema e quer pular essa etapa:
-
-```bash
-FH_ADMIN_SKIP_SYSTEM_DEPS=1 ./scripts/install-linux.sh
-```
-
-Para remover apenas os atalhos de usuário criados pelo instalador:
-
-```bash
-./scripts/uninstall-linux.sh
-```
-
-O uninstall não remove saves nem backups. Use `--config` para remover `.fh-admin-tui.env` e `--venv` para remover a venv local.
-
-Em NixOS, também dá para rodar sem instalar globalmente:
-
-```bash
-nix-shell -p python313Packages.textual python313Packages.rich python313Packages.rapidfuzz nodejs
-```
-
-## Configuração
-
-Por padrão, o app tenta usar:
-
-```text
-~/.local/share/Steam/steamapps/common/Fear & Hunger/www
-```
-
-O comando `./run.py configure` salva esses valores em `.fh-admin-tui.env`, que fica ignorado pelo Git. Também é possível configurar por variáveis de ambiente.
-
-Variáveis aceitas:
-
-- `FH_GAME_ROOT`: pasta `www` do jogo.
-- `FH_SAVE_DIR`: pasta de saves; se omitida, usa `$FH_GAME_ROOT/save`.
-- `FH_DATA_DIR`: pasta de dados; se omitida, usa `$FH_GAME_ROOT/data`.
-- `FH_CODEC_SCRIPT`: caminho para `rpgsave_codec.js`.
-- `FH_BACKUP_DIR`: pasta de backups automáticos.
-
-Exemplo com variáveis de ambiente:
-
-```bash
-export FH_GAME_ROOT="$HOME/.local/share/Steam/steamapps/common/Fear & Hunger/www"
-export FH_SAVE_DIR="$FH_GAME_ROOT/save"
-export FH_DATA_DIR="$FH_GAME_ROOT/data"
-export FH_BACKUP_DIR="$HOME/fh-save-backups"
-./run.py
-```
-
-Exemplo com argumentos:
-
-```bash
-./run.py \
-  --game-root "$HOME/.local/share/Steam/steamapps/common/Fear & Hunger/www" \
-  --backup-dir "$HOME/fh-save-backups"
-```
-
-## Como executar
-
-No checkout do projeto:
-
-```bash
-./run.py
-```
-
-Depois de rodar `./scripts/install-linux.sh`, abra um novo terminal e use:
+O instalador cobre Ubuntu/Debian, Fedora/RHEL, Arch/Artix, openSUSE/SUSE e Gentoo. Ele também cria atalhos em `~/.local/bin`:
 
 ```bash
 fh-admin-tui
 fh admin tui
 ```
 
-Configurar paths pela primeira vez:
+Se você já tem Python, pip/venv, git e Node.js instalados, pule dependências de sistema:
 
 ```bash
-./run.py setup
-# ou, depois do instalador:
+./scripts/install-linux.sh --no-system-deps
+```
+
+Em NixOS, esse modo é o recomendado. O instalador cria a `.venv`, instala o projeto em modo editável e adiciona `~/.local/bin` ao Fish via `~/.config/fish/conf.d/fh-admin-tui.fish` quando necessário.
+
+Instalação manual equivalente:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m ensurepip --upgrade
+.venv/bin/python -m pip install -e '.[dev]'
+```
+
+## Primeiro Uso
+
+Depois de instalar, abra um terminal novo e rode:
+
+```bash
 fh admin tui setup
 ```
 
-O setup abre um menu interativo para detectar o jogo, informar a pasta `www`, rodar diagnóstico e abrir o editor.
-
-Também dá para rodar a configuração manual direta:
+Ou, dentro do checkout:
 
 ```bash
-./run.py configure
+./run.py setup
 ```
 
-Diagnóstico de configuração e dependências:
+O setup abre um menu interativo:
+
+```text
+1. Detectar jogo automaticamente
+2. Informar caminho manualmente
+3. Ver configuracao atual
+4. Rodar diagnostico
+5. Abrir editor
+6. Sair
+```
+
+Se o jogo estiver no pendrive, você pode informar a pasta `www` assim:
+
+```text
+$HOME/pendrive/@home/<usuario>/.local/share/Steam/steamapps/common/Fear & Hunger/www
+```
+
+Também pode digitar relativo ao seu home:
+
+```text
+pendrive/@home/<usuario>/.local/share/Steam/steamapps/common/Fear & Hunger/www
+```
+
+Troque `<usuario>` pelo nome do usuario copiado no pendrive. O setup aceita caminhos com espacos, aspas ou barras invertidas e salva tudo em `.fh-admin-tui.env`, ignorado pelo Git.
+
+## Como Executar
+
+Abrir o editor:
 
 ```bash
-./run.py doctor
+fh admin tui
 ```
 
-Depois de instalar com `pip install -e .`, o entrypoint também fica disponível:
+ou:
 
 ```bash
 fh-admin-tui
 ```
 
-## Como usar
+Rodar diagnóstico:
+
+```bash
+fh admin tui doctor
+```
+
+Reabrir o setup:
+
+```bash
+fh admin tui setup
+```
+
+Comandos diretos pelo checkout continuam funcionando:
+
+```bash
+./run.py
+./run.py doctor
+./run.py setup
+./run.py configure
+```
+
+`configure` é o caminho manual direto; `setup` é o menu interativo recomendado.
+
+## Configuração
+
+Ordem de prioridade dos caminhos:
+
+1. argumentos CLI, como `--game-root`;
+2. variáveis de ambiente;
+3. `.fh-admin-tui.env` criado pelo setup;
+4. defaults do projeto.
+
+Variáveis aceitas:
+
+- `FH_GAME_ROOT`: pasta `www` do jogo.
+- `FH_SAVE_DIR`: pasta de saves; se omitida, usa `$FH_GAME_ROOT/save`.
+- `FH_DATA_DIR`: pasta de dados; se omitida, usa `$FH_GAME_ROOT/data`.
+- `FH_CODEC_SCRIPT`: caminho para `rpgsave_codec.js`; normalmente não precisa configurar.
+- `FH_BACKUP_DIR`: pasta de backups automáticos.
+
+Exemplo:
+
+```bash
+FH_GAME_ROOT="$HOME/pendrive/@home/<usuario>/.local/share/Steam/steamapps/common/Fear & Hunger/www" fh admin tui doctor
+```
+
+## Como Usar A TUI
 
 A tela principal é dividida em três áreas:
 
-- Esquerda: slots, backup, restauração e atualização da lista.
-- Centro: abas de resumo, itens, armas, armaduras e personagens.
-- Direita: detalhes da seleção atual e ações contextuais.
+- esquerda: slots, backup, restauração e atualização da lista;
+- centro: abas de resumo, itens, armas, armaduras e personagens;
+- direita: detalhes da seleção atual e ações contextuais.
 
 Atalhos principais:
 
-- `Ctrl+S`: revisar e aplicar alterações.
-- `Ctrl+B`: criar backup do slot selecionado.
-- `Ctrl+R`: recarregar a sessão do slot aberto.
-- `F5`: recarregar lista de slots.
-- `Ctrl+Q`: sair.
+- `Ctrl+S`: revisar e aplicar alterações;
+- `Ctrl+B`: criar backup do slot selecionado;
+- `Ctrl+R`: recarregar a sessão do slot aberto;
+- `F5`: recarregar lista de slots;
+- `Ctrl+Q`: sair;
 - `?`: ajuda curta.
 
-## Estrutura do projeto
+## Uninstall
 
-- `fh_admin_tui/config.py`: resolução de paths, variáveis de ambiente, defaults e validação de runtime.
+Para remover os atalhos de usuário criados pelo instalador:
+
+```bash
+./scripts/uninstall-linux.sh
+```
+
+Por padrão, ele remove apenas:
+
+- `~/.local/bin/fh`
+- `~/.local/bin/fh-admin-tui`
+
+Ele **não remove saves nem backups**. Opções extras:
+
+```bash
+./scripts/uninstall-linux.sh --config  # remove .fh-admin-tui.env
+./scripts/uninstall-linux.sh --venv    # remove .venv
+```
+
+## Estrutura Do Projeto
+
+- `run.py`: launcher, setup CLI, diagnóstico e ponte para a TUI.
+- `fh_admin_tui/config.py`: resolução de paths, env vars e defaults.
+- `fh_admin_tui/cli_config.py`: leitura/escrita da config local `.fh-admin-tui.env`.
+- `fh_admin_tui/doctor.py`: diagnóstico de runtime, paths, Node, catálogo e backups.
 - `fh_admin_tui/domain/`: regras testáveis de inventário, personagens, validação e resumo de alterações.
-- `fh_admin_tui/mutations.py`: fachada de compatibilidade para imports antigos; código novo deve usar `domain/`.
+- `fh_admin_tui/mutations.py`: fachada de compatibilidade para imports antigos.
 - `fh_admin_tui/save_ops.py`: IO, backup, codec, sessão de edição e escrita atômica.
-- `fh_admin_tui/textual_app.py`: shell principal da aplicação Textual, seleção, eventos e ligação com controllers.
-- `fh_admin_tui/controllers/`: fluxos Textual que orquestram modais, confirmações e chamadas de serviços.
-- `fh_admin_tui/services/`: casos de uso de inventory, personagens e revisão antes do apply.
+- `fh_admin_tui/textual_app.py`: shell principal Textual.
+- `fh_admin_tui/controllers/`: fluxos Textual e chamadas de serviços.
+- `fh_admin_tui/services/`: casos de uso de inventário, personagens e revisão antes do apply.
 - `fh_admin_tui/ui/`: layout, telas/modais e helpers de renderização.
-- `fh_admin_tui/legacy/tui.py`: interface curses legada/deprecada; não é o caminho principal recomendado.
-- `scripts/install-linux.sh`: instalador simples para distros Linux comuns.
-- `tests/fixtures/`: saves e catálogos mínimos falsos para testes sem jogo instalado.
+- `fh_admin_tui/legacy/tui.py`: interface curses legada.
+- `scripts/install-linux.sh`: instalador Linux e atalhos de usuário.
+- `scripts/uninstall-linux.sh`: remoção segura dos atalhos.
+- `tests/fixtures/`: saves e catálogos mínimos falsos.
 
 ## Desenvolvimento
 
-Rodar testes unitários:
+Rodar testes:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Checar sintaxe dos módulos principais sem gravar `__pycache__` no repo:
+Checar sintaxe dos módulos principais:
 
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/fh-admin-tui-pycache python -m py_compile \
+  run.py \
   fh_admin_tui/config.py \
+  fh_admin_tui/cli_config.py \
+  fh_admin_tui/doctor.py \
   fh_admin_tui/save_ops.py \
-  fh_admin_tui/ui/screens.py \
-  fh_admin_tui/ui/rendering.py \
-  fh_admin_tui/ui/layout.py \
-  fh_admin_tui/services/results.py \
-  fh_admin_tui/services/actor_service.py \
-  fh_admin_tui/services/inventory_service.py \
   fh_admin_tui/domain/inventory_rules.py \
   fh_admin_tui/domain/character_rules.py \
   fh_admin_tui/domain/save_validation.py \
   fh_admin_tui/domain/change_summary.py \
+  fh_admin_tui/services/results.py \
+  fh_admin_tui/services/actor_service.py \
+  fh_admin_tui/services/inventory_service.py \
   fh_admin_tui/services/review_service.py \
   fh_admin_tui/controllers/textual_actions.py \
-  fh_admin_tui/doctor.py \
-  fh_admin_tui/textual_app.py
+  fh_admin_tui/ui/screens.py \
+  fh_admin_tui/ui/rendering.py \
+  fh_admin_tui/ui/layout.py \
+  fh_admin_tui/textual_app.py \
+  fh_admin_tui/legacy/tui.py
 ```
 
-## Testes
+Validar o codec empacotado:
 
-A suíte usa `unittest` e fixtures falsas, então não depende de um save real instalado no computador do desenvolvedor. O repositório também possui workflow de GitHub Actions para rodar testes, compile check e `node --check` no codec empacotado.
+```bash
+node --check fh_admin_tui/resources/rpgsave_codec.js
+```
 
-Cobertura atual:
+O GitHub Actions roda testes, compile check e `node --check`.
 
-- configuração por env vars e defaults;
-- mutações de inventory e personagens;
+## Cobertura De Testes
+
+A suíte usa `unittest` e fixtures falsas, então não depende do jogo instalado. Cobertura atual:
+
+- configuração por env vars, arquivo local e defaults;
+- setup/diagnóstico de caminhos;
+- codec empacotado e round-trip controlado;
+- mutações de inventário e personagens;
 - validação de saves malformados;
 - backup/apply sem tocar em save real;
-- proteção contra round-trip de codec que altera dados staged;
+- proteção contra codec que altera dados staged;
 - restore recusando backup inválido;
-- fluxo Textual básico quando `textual` está instalado.
-
-Em ambientes sem dependências de UI, os testes Textual são pulados explicitamente.
-
-## Roadmap
-
-- Aumentar cobertura dos fluxos de apply/restore via Textual.
-- Melhorar mensagens de erro com sugestões de variáveis de ambiente específicas.
-- Decidir se a interface curses legada será removida em uma versão futura.
-
-## Aviso sobre saves
-
-Este projeto edita arquivos de save. Embora o apply crie backup automático e valide antes de gravar, mantenha cópias externas dos saves importantes. Não use em saves únicos sem backup.
+- fluxo Textual básico e apply com backup quando `textual` está instalado.
 
 ## Troubleshooting
 
-- `Dependência ausente: textual`: crie a `.venv` e rode `.venv/bin/python -m pip install -e '.[dev]'`.
-- `Pasta de saves nao encontrada`: rode `./run.py setup` ou configure `FH_GAME_ROOT`/`FH_SAVE_DIR`.
-- `Arquivos ausentes em data`: rode `./run.py setup` e confirme que o game root aponta para a pasta `www` correta.
-- `Arquivo de script do codec nao encontrado`: reinstale o projeto; o codec vem incluso no pacote. `FH_CODEC_SCRIPT` pode sobrescrever o caminho para desenvolvimento.
-- `Arquivo de lz-string nao encontrado`: confirme que `FH_GAME_ROOT` aponta para a pasta `www` do jogo.
-- Falha fatal na UI: consulte `~/.local/state/fh-admin-tui/fh-admin-tui.log`.
+- `fh: command not found`: abra um terminal novo ou rode `export PATH="$HOME/.local/bin:$PATH"`.
+- `Dependência ausente: textual`: rode `./scripts/install-linux.sh --no-system-deps` ou reinstale a venv.
+- `Pasta de saves nao encontrada`: rode `fh admin tui setup` e confira a pasta `www` do jogo.
+- `Arquivos ausentes em data`: o game root está errado; ele deve apontar para a pasta `www`, não para `Fear & Hunger` nem para `data`.
+- `Arquivo de lz-string nao encontrado`: confira se `FH_GAME_ROOT` aponta para a pasta `www` correta.
+- `Arquivo de script do codec nao encontrado`: reinstale o projeto; o codec vem incluso no pacote.
+- Falha fatal na UI: veja `~/.local/state/fh-admin-tui/fh-admin-tui.log`.
+
+## Aviso Sobre Saves
+
+Este projeto edita arquivos de save. O apply cria backup automático e valida antes de gravar, mas você ainda deve manter backup externo dos saves importantes.
 
 ## Licença
 
